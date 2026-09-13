@@ -1,0 +1,10 @@
+{
+  "name": "india-equity-screener-automation",
+  "version": "1.0.0",
+  "private": true,
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "@vercel/blob": "^0.27.0",
+    "cheerio": "^1.0.0"
+  }
+}
