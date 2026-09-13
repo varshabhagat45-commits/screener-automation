@@ -1,21 +1,39 @@
 # India Equity Screener — Daily Automation
 
-Automates the 452-stock dashboard in three tiers:
+Automates the 452-stock dashboard in three tiers, each its **own small serverless
+function** rather than one big one:
 
-| Tier | Fields | Source | Cadence |
-|---|---|---|---|
-| 1 | price, mom1y/6m/3m, P/E, P/B | Dhan API | Daily (Mon-Fri, 5:30pm IST) |
-| 2 | ROE, ROCE, margins, D/E, CAGR, promoter | Screener.in scrape | Mon + Thu (rarely changes daily) |
-| 3 | qScore, momScore, jScore, wealthScore, stage, trigger/evidence/invalidation | Claude API (batched) | Daily |
+| Stage | Endpoint | Fields | Schedule (IST) | Runtime budget |
+|---|---|---|---|---|
+| 1 | `api/cron/price-refresh` | price, mom1y/6m/3m, P/E, P/B | Daily 5:30pm | 120s |
+| 2 | `api/cron/fundamentals-refresh?shard=0..3` | ROE, ROCE, margins, D/E, CAGR, promoter | Mon+Thu, 5:34/39/44/49pm (4 shards) | 250s each |
+| 3 | `api/cron/ai-rescore` | qScore, momScore, jScore, wealthScore, stage, narrative, composite, verdict | Daily 5:56pm | 200s |
 
-Then `composite` and `hold` verdict are recomputed deterministically (`lib/scoring.js`,
-ported from the original app's `scoring.ts`).
+**Why split into stages instead of one function:** Vercel caps function duration at
+300 seconds *on every plan* — that's a hard platform limit, not something a paid
+tier removes. Scraping all 452 Screener.in pages alone takes ~11 minutes at a
+polite 1.5s/request rate, so it has to be sharded across 4 separate invocations
+(deterministic partition by array index, so the 4 shards together cover exactly
+all 452 stocks with no overlap or gaps).
+
+**Why the stages are spaced ~5 minutes apart, not run in parallel:** each stage
+reads the current dataset from Blob, updates its slice, and writes the whole
+thing back. If two stages ran at the same moment, the second to finish would
+overwrite the first's changes with stale data it read before the first stage's
+write landed. Spacing them out is a simple fix for this sandbox-scale project;
+if you outgrow it, a proper per-field merge (patch specific keys instead of
+overwriting the whole document) would remove the ordering dependency entirely.
+
+`composite` and `hold` verdict are recomputed deterministically at the end of stage
+3 (`lib/scoring.js`, ported from the original app's `scoring.ts`).
 
 ## Setup
 
-1. **Deploy to Vercel** (`vercel deploy`), on a plan that supports extended function
-   duration (`maxDuration: 800` in `vercel.json` needs Pro + Fluid Compute — the free
-   Hobby plan caps at 10s per invocation, nowhere near enough for 452 stocks).
+1. **Deploy to Vercel** (`vercel deploy` or via Git import). Cron Jobs themselves
+   require a paid plan (Hobby/free doesn't support scheduling multiple crons per
+   day) — check current Vercel pricing for what each stage's `maxDuration` needs,
+   since per-function duration limits vary by plan tier even though 300s is the
+   platform-wide ceiling.
 2. **Environment variables** (Vercel dashboard → Settings → Environment Variables):
    - `DHAN_ACCESS_TOKEN`, `DHAN_CLIENT_ID` — same as your `nexus-eod-scanner` setup
    - `ANTHROPIC_API_KEY` — for the daily re-scoring pass
@@ -31,9 +49,11 @@ ported from the original app's `scoring.ts`).
    `lib/scrape-fundamentals.js` is illustrative — check it against the live site's
    current markup before trusting it, and consider swapping in `cheerio` for
    proper DOM parsing if the regex proves brittle.
-5. **First manual run**: hit `/api/cron/daily-refresh` yourself with the right
-   `Authorization: Bearer <CRON_SECRET>` header to confirm it completes end to end
-   before letting the cron schedule take over.
+5. **First manual run**: hit each stage yourself in order, with the right
+   `Authorization: Bearer <CRON_SECRET>` header, before trusting the schedule:
+   `/api/cron/price-refresh`, then (Mon/Thu only) `/api/cron/fundamentals-refresh?shard=0`
+   through `shard=3`, then `/api/cron/ai-rescore`. Check each response's JSON for
+   errors before moving to the next.
 
 ## What's real vs. what's scaffolded
 

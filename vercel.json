@@ -1,13 +1,15 @@
 {
   "crons": [
-    {
-      "path": "/api/cron/daily-refresh",
-      "schedule": "0 12 * * 1-5"
-    }
+    { "path": "/api/cron/price-refresh", "schedule": "0 12 * * 1-5" },
+    { "path": "/api/cron/fundamentals-refresh?shard=0", "schedule": "4 12 * * 1,4" },
+    { "path": "/api/cron/fundamentals-refresh?shard=1", "schedule": "9 12 * * 1,4" },
+    { "path": "/api/cron/fundamentals-refresh?shard=2", "schedule": "14 12 * * 1,4" },
+    { "path": "/api/cron/fundamentals-refresh?shard=3", "schedule": "19 12 * * 1,4" },
+    { "path": "/api/cron/ai-rescore", "schedule": "26 12 * * 1-5" }
   ],
   "functions": {
-    "api/cron/daily-refresh.js": {
-      "maxDuration": 800
-    }
+    "api/cron/price-refresh.js": { "maxDuration": 120 },
+    "api/cron/fundamentals-refresh.js": { "maxDuration": 250 },
+    "api/cron/ai-rescore.js": { "maxDuration": 200 }
   }
 }
